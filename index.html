@@ -1,0 +1,105 @@
+<!DOCTYPE html>
+<html lang="en">
+  <head>
+    <meta charset="UTF-8" />
+    <meta
+      http-equiv="Content-Security-Policy"
+      content="default-src 'self'; script-src 'self'"
+    />
+    <meta
+      http-equiv="X-Content-Security-Policy"
+      content="default-src 'self'; script-src 'self'"
+    />
+    <title>Skyshard Companion</title>
+    <link rel="stylesheet" href="./styles.css" />
+  </head>
+  <body>
+    <header class="topbar">
+      <div class="brand">Skyshard Companion</div>
+      <div class="status" id="status">Waiting for the game log…</div>
+      <div class="actions">
+        <button id="chooseLog" type="button">Choose log file…</button>
+        <button id="resetLog" type="button" hidden>Use default log</button>
+        <button id="readShops" type="button" title="Read the units in each shop you open">Shop reading: on</button>
+      </div>
+    </header>
+
+    <main class="layout">
+      <section class="panel island-panel">
+        <div class="panel-head">
+          <div class="tabs" role="tablist">
+            <button type="button" class="tab active" data-view="build" role="tab">My island</button>
+            <button type="button" class="tab" data-view="opponent" role="tab">Last opponent</button>
+          </div>
+          <div class="muted" id="boardMeta"></div>
+        </div>
+        <div id="island" class="island"></div>
+        <div class="legend" id="legend"></div>
+        <div class="summary" id="summary"></div>
+        <div class="detail" id="detail" hidden></div>
+        <div class="add-unit" id="addUnit">
+          <input id="addUnitInput" list="allUnitNames" placeholder="Add a unit the app missed…" autocomplete="off" />
+          <datalist id="allUnitNames"></datalist>
+        </div>
+        <p class="place-hint" id="placeHint" hidden></p>
+        <div id="missingPanel" class="missing" hidden>
+          <h3>Not shown on the island</h3>
+          <p class="hint">The app reads your island whenever its grid shows in the game (while you drag a unit, or with Island Stats open). These are units it couldn't find there. They still count for suggestions, except ones it thinks you sold.</p>
+          <ul id="missing"></ul>
+        </div>
+      </section>
+
+      <div class="side">
+        <section class="panel" id="shopPanel">
+          <div class="panel-head">
+            <h2>Latest shop</h2>
+            <span class="muted" id="visionStatus"></span>
+            <button type="button" class="link" id="openCaptures" title="Pictures of your recent shops, with what the app read in each">Shop pictures</button>
+          </div>
+          <div id="shopNow"></div>
+        </section>
+
+        <section class="panel">
+          <div class="panel-head">
+            <h2>Units to look for</h2>
+            <span class="muted" id="recCount"></span>
+          </div>
+          <ol class="recs" id="recs"></ol>
+          <button type="button" class="more" id="recMore" hidden>Show more</button>
+        </section>
+
+        <section class="panel">
+          <div class="panel-head">
+            <h2>Shop picks</h2>
+            <div class="costs" id="costFilter"></div>
+          </div>
+          <p class="hint">Chance that a shop offers at least one of your top 15 suggestions.</p>
+          <ol class="shops" id="shops"></ol>
+        </section>
+
+        <section class="panel">
+          <div class="panel-head">
+            <h2>Bought this round</h2>
+            <button type="button" class="link" id="clearBought" hidden>Clear</button>
+          </div>
+          <p class="hint">The log only updates between rounds. Add units you buy now so suggestions keep up; the list clears when the next round's board arrives.</p>
+          <div class="add-row">
+            <input id="boughtInput" list="unitNames" placeholder="Add a unit…" autocomplete="off" />
+            <datalist id="unitNames"></datalist>
+            <button type="button" id="addBought">Add</button>
+          </div>
+          <ul class="chips" id="bought"></ul>
+        </section>
+
+        <section class="panel" id="unlockPanel" hidden>
+          <div class="panel-head"><h2>Unlocked in shops</h2></div>
+          <p class="hint">These only appear in shops because of a unit on your board.</p>
+          <ul class="chips" id="unlocks"></ul>
+        </section>
+      </div>
+    </main>
+    <footer class="foot" id="foot"></footer>
+    <script src="./src/core.js"></script>
+    <script src="./renderer.js"></script>
+  </body>
+</html>
