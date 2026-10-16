@@ -7,6 +7,7 @@ contextBridge.exposeInMainWorld('skyshard', {
   setReadShops: on => ipcRenderer.invoke('set-read-shops', on),
   onVision: callback => ipcRenderer.on('vision', (_event, state) => callback(state)),
   labelShop: label => ipcRenderer.send('shop-label', label),
+  setSaveCaptures: on => ipcRenderer.invoke('set-save-captures', on),
   openCaptures: () => ipcRenderer.invoke('open-captures'),
   onShop: callback => ipcRenderer.on('shop', (_event, event) => callback(event)),
   onIsland: callback => ipcRenderer.on('island', (_event, seen) => callback(seen)),

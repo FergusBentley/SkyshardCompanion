@@ -1,6 +1,6 @@
 # Skyshard Companion
 
-A desktop companion for the Steam game Skyshard. It reads your island from the game's log after every round and tells you which units and shops fit your board.
+A desktop companion for the Steam game Skyshard. It reads your island from the game's log and tells you which units and shops fit your board.
 
 ## Run it
 
@@ -20,17 +20,13 @@ The app watches `%APPDATA%\Project SkyShard\logs\godot.log`. If your log is some
 - **Bought this round**: the log only updates between rounds, so add mid-round purchases here. The list clears when the next board arrives.
 - **Unlocked in shops**: conditional units your board has made available.
 
-## Shop reading
+## Build a Windows app
 
-A hidden window watches a live video of the game window (any window whose title contains "SkyShard") and checks it 10 times a second. The shop island stays on screen, empty, between shops. A shop counts as open once a full set of units (1, 3 or 6) stands on it and has finished spawning in, compared against a picture of the empty island (`unit-art/empty-shop.*`). It counts as closed once they're all gone. The opponent's island in combat doesn't count, and neither does a unit's tooltip.
+```
+npm run dist
+```
 
-That frame is read in the background, and the app lists up to 5 likely units for each slot. Picking a unit closes the shop at once, so the app tells which one you took from where your mouse was as the shop closed. It assumes the game fills the screen it's on. If the app gets the pick wrong, press **Took this** on the right unit. If it isn't sure what a unit is, choose from its guesses or type the name.
-
-Recognition compares the screen with each unit's picture from the in-game library (`src/vision.js`). A unit's size on screen follows its footprint, about 26 px per tile at 1280x720. It needs the game in a 16:9 fullscreen or borderless window, with the default camera.
-
-**Shop pictures** opens the folder of the last 60 shops. Each picture comes with a `.json` file listing what the app read, the mouse path, and any corrections you made. Send a few of these to tune recognition against real games.
-
-The unit pictures live in `unit-art/`. They are the game's own art, so that folder keeps itself out of git.
+This makes `dist/SkyshardCompanion-<version>.exe`, a single file that runs without installing Node or Git. Upload it to a GitHub release to share it. Windows may warn about it the first time because it isn't signed: **More info**, then **Run anyway**.
 
 ## Data
 

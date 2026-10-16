@@ -816,6 +816,11 @@ async function init () {
   $('chooseLog').addEventListener('click', async () => setLogButtons(await api.chooseLog()))
   $('resetLog').addEventListener('click', async () => setLogButtons(await api.resetLog()))
   $('openCaptures').addEventListener('click', () => api.openCaptures())
+  $('saveCaptures').addEventListener('change', async e => {
+    const on = await api.setSaveCaptures(e.target.checked)
+    e.target.checked = on
+    $('openCaptures').hidden = !on
+  })
   $('readShops').addEventListener('click', async () => {
     state.readShops = !state.readShops
     state.vision = await api.setReadShops(state.readShops)
@@ -845,6 +850,8 @@ async function init () {
   addInput.addEventListener('change', addUnit)
   addInput.addEventListener('keydown', e => { if (e.key === 'Enter') addUnit() })
   state.vision = initial.vision || state.vision
+  $('saveCaptures').checked = !!initial.saveCaptures
+  $('openCaptures').hidden = !initial.saveCaptures
   state.readShops = initial.vision ? initial.vision.status !== 'off' : true
   setLog(initial.log)
   restoreRound()

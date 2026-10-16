@@ -1,3 +1,2 @@
-# Unit art comes from the game. Keep it out of git.
-*
-!.gitignore
+fixtures/
+review/

@@ -9,13 +9,46 @@
   "scripts": {
     "start": "electron .",
     "test": "node --test test/*.test.js",
-    "data": "node scripts/build-data.js"
+    "data": "node scripts/build-data.js",
+    "dist": "electron-builder --win portable"
   },
   "devDependencies": {
-    "electron": "^44.7.0"
+    "electron": "^44.7.0",
+    "electron-builder": "^26.0.12"
   },
   "dependencies": {
     "@tesseract.js-data/eng": "^1.0.0",
     "tesseract.js": "^5.1.1"
+  },
+  "build": {
+    "appId": "com.skyshard.companion",
+    "productName": "Skyshard Companion",
+    "asar": false,
+    "files": [
+      "main.js",
+      "renderer.js",
+      "preload.js",
+      "preload-capture.js",
+      "capture.js",
+      "capture.html",
+      "index.html",
+      "styles.css",
+      "src/**",
+      "data/**",
+      "unit-art/*.bin",
+      "unit-art/*.json",
+      "unit-art/*.gz",
+      "package.json"
+    ],
+    "win": {
+      "target": "portable",
+      "signAndEditExecutable": false
+    },
+    "portable": {
+      "artifactName": "SkyshardCompanion-${version}.exe"
+    },
+    "directories": {
+      "output": "dist"
+    }
   }
 }

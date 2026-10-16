@@ -37,6 +37,8 @@ const MAX_CAPTURES = 60
 const readJson = file => { try { return JSON.parse(fs.readFileSync(file, 'utf8')) } catch { return null } }
 const send = (channel, payload) => { if (win && !win.isDestroyed()) win.webContents.send(channel, payload) }
 const logPath = () => settings.logPath || defaultLogPath()
+// Pictures and notes for tuning the screen reader. Off unless turned on in the app; nothing reads them back.
+const keepCaptures = () => settings.saveCaptures === true
 
 function saveSettings () {
   fs.writeFileSync(settingsFile(), JSON.stringify(settings))
@@ -379,6 +381,7 @@ ipcMain.on('unit-card', async (_event, msg) => {
 
 // What each card said and where its unit was found, in cards.log, with the last few card pictures.
 function noteCard (info) {
+  if (!keepCaptures()) return
   try {
     fs.mkdirSync(captureDir(), { recursive: true })
     const file = path.join(captureDir(), 'cards.log')
@@ -390,6 +393,7 @@ function noteCard (info) {
   }
 }
 function saveCardPicture (frame) {
+  if (!keepCaptures()) return
   try {
     const dir = path.join(captureDir(), 'cards')
     fs.mkdirSync(dir, { recursive: true })
@@ -403,6 +407,7 @@ function saveCardPicture (frame) {
 
 // Keeps the last few island pictures where something was seen, with what was read, to check against.
 function saveIsland (frame, reading) {
+  if (!keepCaptures()) return
   try {
     const dir = path.join(captureDir(), 'island')
     fs.mkdirSync(dir, { recursive: true })
@@ -477,6 +482,7 @@ const captureDir = () => path.join(app.getPath('userData'), 'shop-captures')
 const captureNames = new Map()
 
 function saveCapture (id, width, height, bgra) {
+  if (!keepCaptures()) return
   try {
     fs.mkdirSync(captureDir(), { recursive: true })
     const name = new Date().toISOString().replace(/[:.]/g, '-')
@@ -506,6 +512,7 @@ function saveLabels (id, extra) {
 // What the player says was in the shop and which unit they took.
 // What the capture page saw, once a second; kept short.
 ipcMain.on('capture-debug', (_event, info) => {
+  if (!keepCaptures()) return
   try {
     fs.mkdirSync(captureDir(), { recursive: true })
     if (info.frame) {
@@ -528,12 +535,17 @@ ipcMain.on('capture-debug', (_event, info) => {
 })
 
 ipcMain.on('shop-label', (_event, { id, units, picked }) => saveLabels(id, { player: { units, picked } }))
+ipcMain.handle('set-save-captures', (_event, on) => {
+  settings.saveCaptures = !!on
+  saveSettings()
+  return keepCaptures()
+})
 ipcMain.handle('open-captures', () => {
   fs.mkdirSync(captureDir(), { recursive: true })
   return shell.openPath(captureDir())
 })
 
-ipcMain.handle('get-state', () => ({ data: gameData, log: logState, logPath: logPath(), customLog: !!settings.logPath, vision }))
+ipcMain.handle('get-state', () => ({ data: gameData, log: logState, logPath: logPath(), customLog: !!settings.logPath, vision, saveCaptures: keepCaptures() }))
 
 ipcMain.handle('set-read-shops', (_event, on) => {
   settings.readShops = !!on
