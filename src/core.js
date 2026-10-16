@@ -463,9 +463,30 @@
     return left
   }
 
+  // Spots on the island where the reader saw something it couldn't name for sure (a unit it lost track
+  // of nearly fits there): [{ x, y, w, h, guesses: [{ id, x, y, score }], at }]. A spot stays until the
+  // player names it, a unit is put on its tiles, or its tiles look bare. reading as for trackIsland.
+  function trackUnsure (spots, reading, roster, byId, now) {
+    const tilesOf = s => footprint(s.x, s.y, s.w, s.h)
+    let out = spots
+    if (reading && reading.view === 'ok') {
+      const grid = reading.grid
+      const ground = new Set(reading.ground || [])
+      const bare = k => grid ? grid[k] === '.' : ground.has(k)
+      const fresh = (reading.unsure || []).map(s => ({ ...s, at: now }))
+      const freshTiles = new Set(fresh.flatMap(tilesOf))
+      out = [...out.filter(s => !tilesOf(s).some(k => freshTiles.has(k)) && !tilesOf(s).every(bare)), ...fresh]
+    }
+    const taken = new Set(roster.flatMap(p => {
+      const u = byId.get(p.id)
+      return u ? footprint(p.x, p.y, u.w, u.h) : []
+    }))
+    return out.filter(s => !tilesOf(s).some(k => taken.has(k)))
+  }
+
   return {
     FACTIONS, TYPES, ROLES, ISLAND_ROWS, ISLAND_COLS, ISLAND_OFFSET,
     flattenUnits, flattenShops, indexUnits, wordsFromBytes, boardFromWords, parseLog,
-    summarize, copiesPerBuy, ownedCounts, recommend, unlocks, shopPool, topPicks, scoreShops, footprint, onIsland, pieceKey, mergeLog, placePiece, nameFromCard, matchName, trackIsland, unplacedBought
+    summarize, copiesPerBuy, ownedCounts, recommend, unlocks, shopPool, topPicks, scoreShops, footprint, onIsland, pieceKey, mergeLog, placePiece, nameFromCard, matchName, trackIsland, trackUnsure, unplacedBought
   }
 })

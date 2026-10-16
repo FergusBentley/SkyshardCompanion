@@ -278,6 +278,7 @@ ipcMain.on('shop-closed', (_event, info) => {
 let islandBusy = false
 let islandSeq = 0
 let islandFrame = null // the frame being read, kept until its reading shows whether it's worth saving
+let lastIslandShot = null // the last frame read with the island in its usual view, for correction examples
 // Enough for a whole run, so unit variants can be learned from it afterwards against the game log.
 const MAX_ISLAND_SHOTS = 150
 let islandSavedAt = 0
@@ -290,6 +291,15 @@ ipcMain.on('island-look-for', (_event, look) => {
   islandPieces = Array.isArray(look && look.pieces) ? look.pieces.slice(0, 200) : []
 })
 // A new run: the island is read from scratch.
+// The player says a unit stands on a tile the app shows as empty: what the island reader thinks it is.
+const probes = new Map()
+ipcMain.handle('island-probe', (_event, { x, y }) => new Promise(resolve => {
+  if (!islandWorker) return resolve({ guesses: [], off: true })
+  const id = ++islandSeq
+  const timer = setTimeout(() => { probes.delete(id); resolve({ guesses: [], error: 'timed out' }) }, 20000)
+  probes.set(id, out => { clearTimeout(timer); resolve(out) })
+  islandWorker.postMessage({ type: 'probe', id, key: `${x},${y}`, pieces: islandPieces })
+}))
 ipcMain.on('island-new-run', () => { if (islandWorker) islandWorker.postMessage({ type: 'island-reset' }) })
 // The round on the game's counter, which tells the window when a new run has started.
 ipcMain.on('screen-round', (_event, n) => { if (Number.isInteger(n)) send('screen-round', n) })
@@ -424,6 +434,13 @@ function saveIsland (frame, reading) {
 }
 
 function onShopRead (msg) {
+  if (msg.type === 'probe') {
+    const done = probes.get(msg.id)
+    probes.delete(msg.id)
+    if (msg.error) console.error('Checking a tile failed:', msg.error)
+    if (done) done({ guesses: msg.guesses, noView: !!msg.noView, error: msg.error })
+    return
+  }
   if (msg.type === 'card' || msg.type === 'card-error') {
     if (cardFrame) saveCardPicture(cardFrame)
     cardFrame = null
@@ -447,6 +464,7 @@ function onShopRead (msg) {
       islandSavedAt = Date.now()
       saveIsland(islandFrame, reading)
     }
+    if (reading && islandFrame && reading.view === 'ok') lastIslandShot = { ...islandFrame, at: Date.now() }
     islandFrame = null
     // Something new was seen once: ask for another look straight away to confirm it.
     if (reading && reading.pending && captureWin && !captureWin.isDestroyed()) captureWin.webContents.send('island-recheck')
@@ -535,6 +553,34 @@ ipcMain.on('capture-debug', (_event, info) => {
 })
 
 ipcMain.on('shop-label', (_event, { id, units, picked }) => saveLabels(id, { player: { units, picked } }))
+
+// The player corrected the island (named, placed, moved or took off a unit): the last clear island frame
+// is kept with what the player said, as an example to tune recognition with. Only in a copy run from
+// the code (npm start) with Save pictures on; the packaged app never keeps these.
+const MAX_LABEL_FRAMES = 100
+ipcMain.on('island-label', (_event, label) => {
+  if (app.isPackaged || !keepCaptures() || !lastIslandShot) return
+  try {
+    const dir = path.join(captureDir(), 'labels')
+    fs.mkdirSync(dir, { recursive: true })
+    const shot = lastIslandShot
+    const name = new Date(shot.at).toISOString().replace(/[:.]/g, '-')
+    const png = path.join(dir, `${name}.png`)
+    if (!fs.existsSync(png)) {
+      fs.writeFileSync(png, nativeImage.createFromBitmap(shot.data, { width: shot.width, height: shot.height }).toPNG())
+      if (shot.hi) fs.writeFileSync(path.join(dir, `${name}.full.png`), nativeImage.createFromBitmap(shot.hi.data, { width: shot.hi.width, height: shot.hi.height }).toPNG())
+    }
+    // Every correction made on this frame, with the island as the app had it just before.
+    const file = path.join(dir, `${name}.json`)
+    const saved = readJson(file) || { frameAt: new Date(shot.at).toISOString(), hi: shot.hi && { scale: shot.hi.scale, x0: shot.hi.x0, y0: shot.hi.y0, width: shot.hi.width, height: shot.hi.height }, labels: [] }
+    saved.labels.push({ ...label, time: new Date().toISOString() })
+    fs.writeFileSync(file, JSON.stringify(saved, null, 1))
+    const old = fs.readdirSync(dir).filter(f => f.endsWith('.json')).sort().slice(0, -MAX_LABEL_FRAMES)
+    for (const f of old) for (const ext of ['.json', '.png', '.full.png']) fs.rmSync(path.join(dir, f.replace(/\.json$/, ext)), { force: true })
+  } catch (err) {
+    console.warn('Could not save the correction:', err.message)
+  }
+})
 ipcMain.handle('set-save-captures', (_event, on) => {
   settings.saveCaptures = !!on
   saveSettings()

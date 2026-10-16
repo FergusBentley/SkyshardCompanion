@@ -281,3 +281,31 @@ test('a hovered unit is looked for only where its picture would cover the mouse'
   assert.ok(spots.every(s => s.y < 2), JSON.stringify(spots))
   assert.ok(!spots[1] || spots[0].score - spots[1].score >= 0.1, JSON.stringify(spots))
 })
+
+test('a lost unit that nearly fits a spot marks it as unsure', { skip }, () => {
+  // Two Azurites moved; one was found again, the other (-6,-2, under the cannon's barrel) fits only 0.63,
+  // below the bar for naming a one-tile unit, so the spot is shown as unsure with Azurite as the guess.
+  const IslandWatch = require('../src/island-watch')
+  const watcher = IslandWatch.createWatcher(load(), byId)
+  const hi = { scale: 2, x0: 80, y0: 200, width: 1120, height: 920, data: zlib.gunzipSync(fs.readFileSync(path.join(ART, 'fixtures', 'azurite-unsure-full.bgra.gz'))) }
+  const pieces = require(path.join(ART, 'fixtures', 'azurite-unsure.json'))
+  const azurite = data.units.find(u => u.name === 'Azurite').id
+  const r = watcher.read(frame('azurite-unsure'), { pieces, missing: [azurite], hi })
+  assert.deepStrictEqual(r.sightings, [])
+  assert.deepStrictEqual(r.unsure.map(s => `${name(s.guesses[0].id)}@${s.x},${s.y}`), ['Azurite@-6,-2'])
+  // Nothing went missing: no unsure spots are looked for.
+  assert.strictEqual(IslandWatch.createWatcher(load(), byId).read(frame('azurite-unsure'), { pieces, hi }).unsure, undefined)
+})
+
+test('a tile the player says holds a unit gets the likeliest units there', { skip }, () => {
+  const hi = { scale: 2, x0: 80, y0: 200, width: 1120, height: 920, data: zlib.gunzipSync(fs.readFileSync(path.join(ART, 'fixtures', 'azurite-unsure-full.bgra.gz'))) }
+  const f = frame('azurite-unsure')
+  const pieces = require(path.join(ART, 'fixtures', 'azurite-unsure.json'))
+  const tiles = ps => ps.flatMap(p => { const u = byId.get(p.id); const o = []; for (let i = 0; i < u.w; i++) for (let j = 0; j < u.h; j++) o.push(`${p.x + i},${p.y - j}`); return o })
+  // The Azurite under the cannon's barrel.
+  assert.strictEqual(name(vision.guessTile(f, load(), byId, '-6,-2', { blocked: tiles(pieces), hi })[0].id), 'Azurite')
+  // A bigger unit, clicked on a corner tile, is placed where its picture fits (Stockmoore's Warehouse, 3x2 at 4,2).
+  const others = pieces.filter(p => !(p.x === 4 && p.y === 2))
+  const [best] = vision.guessTile(f, load(), byId, '6,1', { blocked: tiles(others), hi })
+  assert.strictEqual(`${name(best.id)}@${best.x},${best.y}`, "Stockmoore's Warehouse@4,2")
+})

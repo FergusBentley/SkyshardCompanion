@@ -38,8 +38,26 @@ function locateCard (msg) {
   parentPort.postMessage({ type: 'card', id: msg.id, unit: msg.unit, name: msg.name, spots: spots.map(s => ({ ...s, score: Math.round(s.score * 1000) / 1000 })), others })
 }
 
+// The player says a unit stands on a tile: the likeliest units there, on the last usable island frame.
+function probeTile (msg) {
+  const view = lastViews[0]
+  if (!view) return parentPort.postMessage({ type: 'probe', id: msg.id, guesses: [], noView: true })
+  const blocked = (msg.pieces || []).flatMap(p => {
+    const u = units.get(p.id)
+    const out = []
+    if (u) for (let i = 0; i < u.w; i++) for (let j = 0; j < u.h; j++) out.push(`${p.x + i},${p.y - j}`)
+    return out
+  })
+  const guesses = vision.guessTile(view.frame, templates, units, msg.key, { blocked, hi: view.hi })
+  parentPort.postMessage({ type: 'probe', id: msg.id, guesses: guesses.map(g => ({ ...g, score: Math.round(g.score * 1000) / 1000 })) })
+}
+
 parentPort.on('message', msg => {
   if (msg.type === 'island-reset') { lastViews = []; return watcher.reset() }
+  if (msg.type === 'probe') {
+    try { probeTile(msg) } catch (err) { parentPort.postMessage({ type: 'probe', id: msg.id, guesses: [], error: err.message }) }
+    return
+  }
   if (msg.type === 'card') {
     try { locateCard(msg) } catch (err) { parentPort.postMessage({ type: 'card-error', id: msg.id, message: err.message }) }
     return

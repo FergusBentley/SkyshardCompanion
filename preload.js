@@ -14,6 +14,8 @@ contextBridge.exposeInMainWorld('skyshard', {
   onUnitCard: callback => ipcRenderer.on('unit-card', (_event, spot) => callback(spot)),
   lookFor: look => ipcRenderer.send('island-look-for', look),
   newRun: () => ipcRenderer.send('island-new-run'),
+  labelIsland: label => ipcRenderer.send('island-label', label),
+  probeTile: tile => ipcRenderer.invoke('island-probe', tile),
   onRound: callback => ipcRenderer.on('screen-round', (_event, n) => callback(n)),
   onLog: callback => ipcRenderer.on('log', (_event, state) => callback(state)),
   onData: callback => ipcRenderer.on('data', (_event, data) => callback(data))

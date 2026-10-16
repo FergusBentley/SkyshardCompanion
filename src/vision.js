@@ -1056,8 +1056,10 @@
 
   // The bar for a missing one-tile unit at a spot only the hard search for it tried (see identifyOnIsland).
   const MISSING_ONE_TILE = 0.7
+  // The lowest score worth offering as a guess for a spot nothing was found on.
+  const UNSURE_MIN = 0.5
   const one = u => u.w * u.h === 1
-  function identifyOnIsland (frame, templates, units, tiles, { blocked = [], hints = [], missing = [], minScore = 0.65, minHint = 0.55, minMissing = 0.6, lead = 0.08, maxColour = COLOUR_GAP, hi = null } = {}) {
+  function identifyOnIsland (frame, templates, units, tiles, { blocked = [], hints = [], missing = [], minScore = 0.65, minHint = 0.55, minMissing = 0.6, lead = 0.08, maxColour = COLOUR_GAP, hi = null, unsure = null, unsureMin = UNSURE_MIN, touch = false } = {}) {
     const want = new Set(tiles)
     const stop = new Set(blocked)
     const hinted = new Set(hints)
@@ -1089,7 +1091,8 @@
             else if (want.has(k)) inside++
           }
         }
-        if (!ok || inside * 2 < u.w * u.h) continue
+        // (touch: any spot covering one of the tiles, for a tile the player says a unit stands on.)
+        if (!ok || (touch ? !inside : inside * 2 < u.w * u.h)) continue
         const c = tileCentre(x, y, u.w, u.h)
         // Where the picture fits best (half-size frame), so the full-size pass can look right there.
         // Each picture keeps its own spot: a unit's pictures (library, in-game) can fit a little apart.
@@ -1174,7 +1177,29 @@
       if (!hinted.has(s.id) && rival && rank(s) - rank(rival) < lead) continue
       out.push(s)
     }
+    // Near misses on tiles nothing was found on, grouped by spot, when asked for (unsure: an array to fill).
+    if (unsure) {
+      for (const s of seen) {
+        if (s.score < unsureMin || (!touch && out.some(o => overlaps(o, s)))) continue
+        const guess = { id: s.id, x: s.x, y: s.y, score: s.score }
+        const spot = unsure.find(o => overlaps(o, s))
+        if (!spot) unsure.push({ x: s.x, y: s.y, w: s.w, h: s.h, guesses: [guess] })
+        else if (!spot.guesses.some(g => g.id === s.id)) spot.guesses.push(guess)
+      }
+    }
     return out.map(({ id, x, y, score }) => ({ id, x, y, score }))
+  }
+
+  // The units most likely standing on a tile the player says holds one, best first, each where it fits
+  // best around that tile: [{ id, x, y, score }]. blocked: tiles other units stand on.
+  function guessTile (frame, templates, units, key, { blocked = [], hi = null, max = 5 } = {}) {
+    const near = []
+    const found = identifyOnIsland(frame, templates, units, [key], { blocked, hi, unsure: near, unsureMin: 0.3, touch: true, lead: 0 })
+    const best = new Map()
+    for (const g of [...found, ...near.flatMap(s => s.guesses)]) {
+      if (!best.has(g.id) || best.get(g.id).score < g.score) best.set(g.id, { id: g.id, x: g.x, y: g.y, score: g.score })
+    }
+    return [...best.values()].sort((a, b) => b.score - a.score).slice(0, max)
   }
 
   // Which slot a point (frame coordinates) is over, or -1.
@@ -1201,5 +1226,5 @@
     return -1
   }
 
-  return { FRAME_W, FRAME_H, TILE, LAYOUTS, resize, pyramid, loadTemplates, readSlot, readShop, bestNear, filled, shopOpen, shopLayout, slotsFilled, panelOpen, blobAt, islandTiles, findOnIsland, discoverOnIsland, verifyOnIsland, tileCentre, GRID, slotAt, pickFromTrail, isRoundOne, readRound, ISLAND_TILES, cameraSample, cameraMatch, tileLooks, unitCard, cardTitle, tileAt, locateCardUnit, groundLike, lookChange, coveredTiles, statsOpen, identifyOnIsland }
+  return { FRAME_W, FRAME_H, TILE, LAYOUTS, resize, pyramid, loadTemplates, readSlot, readShop, bestNear, filled, shopOpen, shopLayout, slotsFilled, panelOpen, blobAt, islandTiles, findOnIsland, discoverOnIsland, verifyOnIsland, tileCentre, GRID, slotAt, pickFromTrail, isRoundOne, readRound, ISLAND_TILES, cameraSample, cameraMatch, tileLooks, unitCard, cardTitle, tileAt, locateCardUnit, groundLike, lookChange, coveredTiles, statsOpen, identifyOnIsland, guessTile }
 })

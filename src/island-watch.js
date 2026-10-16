@@ -16,6 +16,9 @@
   const RETRY = 30
   // A one-tile unit seen right beside a settled unit needs at least this score (see read).
   const WEAK_BESIDE = 0.75
+  // A unit the app lost track of that fits a spot this well (but not well enough to name) marks that spot
+  // as holding something, for the player to name.
+  const UNSURE = 0.6
   // A big rearrange: this many tiles changing look within the last CHURN_READS reads. While it lasts,
   // every open tile is searched again every few reads, not only once it looks different: after many
   // drops a tile can end up looking much as it did when it was last searched, with another unit on it.
@@ -52,7 +55,8 @@
     // frame: BGRA 1280x720. pieces: [{ key, id, x, y }] the app thinks are on the island.
     // hints: unit ids bought this round. missing: unit ids the app lost track of lately (likely moved):
     // they're looked for with a lower bar, and every open tile is searched again every few reads. Returns
-    // { view: 'ok'|'moved'|'unknown', grid, stats, covered, ground, verified, sightings }.
+    // { view: 'ok'|'moved'|'unknown', grid, stats, covered, ground, verified, sightings, unsure }; unsure
+    // (while some unit is missing) holds spots where a missing unit nearly fits (see unsureSpots).
     // hi: the island at full size, when the game runs above 1280x720 (see vision.sharpScore).
     // With a card up, only what's needed to take off units that are plainly gone (see read).
     function cardReading (frame, pieces, hi) {
@@ -134,8 +138,11 @@
         // A weak match for a one-tile unit right beside a unit already standing there is usually a piece
         // of that unit's picture (the Soul Engine's leg read as a Shrub), unless it was just bought.
         const beside = s => [-1, 0, 1].some(dx => [-1, 0, 1].some(dy => (dx || dy) && settled.has(`${s.x + dx},${s.y + dy}`)))
-        const seen = vision.identifyOnIsland(frame, templates, units, open, { blocked, hints, missing, hi })
-          .filter(s => !(units.get(s.id).w * units.get(s.id).h === 1 && s.score < WEAK_BESIDE && !hints.includes(s.id) && beside(s)))
+        const near = missing.length ? [] : null
+        const found = vision.identifyOnIsland(frame, templates, units, open, { blocked, hints, missing, hi, unsure: near })
+        const weak = s => units.get(s.id).w * units.get(s.id).h === 1 && s.score < WEAK_BESIDE && !hints.includes(s.id) && beside(s)
+        const seen = found.filter(s => !weak(s))
+        if (near) result.unsure = unsureSpots(missing, near, found.filter(weak), seen)
         const key = s => `${s.id}@${s.x},${s.y}`
         result.sightings = seen.filter(s => pending.has(key(s)))
         pending = new Set(seen.filter(s => !pending.has(key(s))).map(key))
@@ -152,6 +159,28 @@
         pending = new Set()
       }
       return result
+    }
+
+    // For each unit the app lost track of, the spot it fits best where nothing was named, if it fits well
+    // enough: { x, y, w, h, guesses: [{ id, x, y, score }] }, the lost unit first.
+    function unsureSpots (missing, near, weak, seen) {
+      const overlaps = (a, b) => a.x < b.x + b.w && b.x < a.x + a.w && a.y - a.h < b.y && b.y - b.h < a.y
+      const size = s => ({ ...s, w: units.get(s.id).w, h: units.get(s.id).h })
+      const spots = [...weak.map(s => ({ ...size(s), guesses: [s] })), ...near]
+      const out = []
+      for (const id of missing) {
+        let best = null
+        for (const spot of spots) {
+          const g = spot.guesses.find(g => g.id === id)
+          if (g && g.score >= UNSURE && (!best || g.score > best.g.score)) best = { spot, g }
+        }
+        if (!best) continue
+        const spot = size(best.g)
+        if (out.some(o => overlaps(o, spot)) || seen.some(s => overlaps(size(s), spot))) continue
+        const others = best.spot.guesses.filter(g => g.id !== id).sort((a, b) => b.score - a.score).slice(0, 2)
+        out.push({ x: spot.x, y: spot.y, w: spot.w, h: spot.h, guesses: [best.g, ...others] })
+      }
+      return out
     }
 
     return { read, reset }

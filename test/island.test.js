@@ -290,3 +290,22 @@ test('a card\'s name still matches when the reading runs on past it', () => {
   assert.strictEqual(core.matchName('The Big Tree', list).id, 4)
   assert.strictEqual(core.matchName('Tree', list).id, 3)
 })
+
+test('unsure spots stay until named, covered or bare', () => {
+  const byId = new Map([[1, { id: 1, w: 1, h: 1 }], [2, { id: 2, w: 2, h: 2 }]])
+  const spot = { x: 0, y: 0, w: 1, h: 1, guesses: [{ id: 1, x: 0, y: 0, score: 0.63 }] }
+  let spots = core.trackUnsure([], { view: 'ok', ground: [], unsure: [spot] }, [], byId, 1)
+  assert.strictEqual(spots.length, 1)
+  // A later read that doesn't search there again keeps it; a camera move changes nothing.
+  spots = core.trackUnsure(spots, { view: 'ok', ground: ['3,3'] }, [], byId, 2)
+  spots = core.trackUnsure(spots, { view: 'moved' }, [], byId, 3)
+  assert.strictEqual(spots.length, 1)
+  // A unit put over it settles it.
+  assert.strictEqual(core.trackUnsure(spots, null, [{ key: '2@-1,0', id: 2, x: -1, y: 0 }], byId, 4).length, 0)
+  // Its tile turning bare clears it.
+  assert.strictEqual(core.trackUnsure(spots, { view: 'ok', ground: ['0,0'] }, [], byId, 4).length, 0)
+  // A new spot over the same tiles replaces it.
+  const moved = { ...spot, guesses: [{ id: 1, x: 0, y: 0, score: 0.66 }] }
+  const next = core.trackUnsure(spots, { view: 'ok', ground: [], unsure: [moved] }, [], byId, 5)
+  assert.deepStrictEqual(next.map(s => s.guesses[0].score), [0.66])
+})

@@ -26,6 +26,11 @@ const state = {
   // The units on your island as the app believes it: from the log, kept up to date from the screen.
   roster: [],
   removed: [], // [{ piece, at }] units recently taken off the island, newest first (to put back)
+  unsure: [], // spots where the reader saw something it couldn't name for sure (see core.trackUnsure)
+  unsureDismissed: [], // [{ tiles, at }] spots the player said hold nothing
+  selectedUnsure: null, // the key of the unsure spot the player clicked
+  probe: null, // { x, y, guesses, looking } a tile the player says holds a unit the app doesn't show
+  drag: null, // { key, id, dx, dy, at } a unit the player is moving with the right mouse button
   boughtSince: 0, // when the first unit of this round was bought
   islandView: null, // what the last reading of the island said about the view: 'ok', 'moved', 'unknown' or 'card' (a unit's card is up)
   islandSeenAt: 0,
@@ -121,8 +126,10 @@ function renderIsland () {
     const start = (core.ISLAND_COLS - width) / 2
     for (let c = 0; c < width; c++) {
       const tile = { x: start + c - core.ISLAND_OFFSET, y: r - core.ISLAND_OFFSET }
+      const probing = state.probe && state.probe.x === tile.x && state.probe.y === tile.y
+      const canProbe = state.view === 'build' && !placing
       root.append(svg('rect', {
-        class: placing ? 'cell pick' : 'cell',
+        class: placing ? 'cell pick' : `cell${canProbe ? ' probe' : ''}${probing ? ' probing' : ''}`,
         'data-tile': `${tile.x},${tile.y}`,
         onmouseenter: placing ? () => showFootprint(root, tile) : null,
         x: (start + c) * TILE,
@@ -130,7 +137,7 @@ function renderIsland () {
         width: TILE,
         height: TILE,
         rx: 4,
-        onclick: placing ? () => placeAt(tile) : null
+        onclick: placing ? () => placeAt(tile) : canProbe ? () => probeTile(tile) : null
       }))
     }
   })
@@ -151,17 +158,35 @@ function renderIsland () {
     // Dashed until the game's log has the unit at that spot too.
     if (!piece.inLog && (piece.how === 'seen' || piece.how === 'manual')) cls += ' seen'
     if (placing) cls += ' passive'
+    if (state.drag && state.drag.key === piece.key) cls += ' dragging'
     const enchants = (piece.enchants || []).length ? ` · ${plural(piece.enchants.length, 'enchantment')}` : ''
-    root.append(svg('g', { class: cls, onclick: () => selectUnit(piece.id, piece.key) },
-      svg('title', {}, `${u.name}${enchants}${howText(piece)}\n${u.info}`),
+    root.append(svg('g', { class: cls, onclick: () => selectUnit(piece.id, piece.key), onmousedown: e => startDrag(e, root, piece) },
+      svg('title', {}, `${u.name}${enchants}${howText(piece)}\n${u.info}${state.view === 'build' ? '\n(Hold the right mouse button to move it)' : ''}`),
       svg('rect', { class: `f${u.faction}`, x: x + 2, y: y + 2, width: w - 4, height: h - 4, rx: 5 }),
       svg('text', { x: cx, y: y0, 'font-size': size.toFixed(1), 'text-anchor': 'middle', 'dominant-baseline': 'central' },
         lines.map((line, i) => svg('tspan', { x: cx, dy: i ? (size * 1.15).toFixed(1) : 0 }, line))),
       (piece.enchants || []).length ? svg('circle', { class: 'ench', cx: x + w - 9, cy: y + 9, r: 3.5 }) : null
     ))
   }
+  if (state.view === 'build') {
+    for (const spot of state.unsure) {
+      const x = (spot.x + core.ISLAND_OFFSET) * TILE
+      const y = (spot.y - spot.h + 1 + core.ISLAND_OFFSET) * TILE
+      const w = spot.w * TILE
+      const h = spot.h * TILE
+      let cls = 'unit unsure'
+      if (state.selectedUnsure === unsureKey(spot)) cls += ' selected'
+      if (placing) cls += ' passive'
+      root.append(svg('g', { class: cls, onclick: () => selectUnsure(spot) },
+        svg('title', {}, `Something is here the app isn't sure of. Maybe ${unitOf(spot.guesses[0].id).name}? Click to say what it is.`),
+        svg('rect', { x: x + 2, y: y + 2, width: w - 4, height: h - 4, rx: 5 }),
+        svg('text', { x: x + w / 2, y: y + h / 2, 'font-size': Math.min(16, h * 0.6).toFixed(1), 'text-anchor': 'middle', 'dominant-baseline': 'central' }, '?')))
+    }
+  }
   if (placing) root.addEventListener('mouseleave', () => showFootprint(root, null))
+  root.addEventListener('contextmenu', e => e.preventDefault())
   host.append(root)
+  if (state.drag) markTiles(root, dragTiles())
 }
 
 // While placing, the tiles the unit would cover light up under the mouse (red where it won't fit).
@@ -172,12 +197,17 @@ function howText (piece) {
 }
 
 function showFootprint (root, tile) {
-  const keys = new Set()
+  const keys = []
   if (tile) {
     const u = unitOf(state.placing.id)
     const { x, y } = anchorFor(u, tile)
-    for (const k of core.footprint(x, y, u.w, u.h)) keys.add(k)
+    keys.push(...core.footprint(x, y, u.w, u.h))
   }
+  markTiles(root, keys)
+}
+
+function markTiles (root, list) {
+  const keys = new Set(list)
   const fits = [...keys].every(k => core.onIsland(k))
   for (const cell of root.querySelectorAll('.cell')) {
     const on = keys.has(cell.dataset.tile)
@@ -238,7 +268,180 @@ function renderSummary () {
   )
 }
 
+// The player clicked an empty tile to say a unit stands there: the island reader guesses which.
+async function probeTile (tile) {
+  state.probe = { x: tile.x, y: tile.y, guesses: [], looking: true }
+  state.selected = state.selectedKey = state.selectedUnsure = null
+  renderIsland()
+  renderDetail()
+  const out = await api.probeTile(tile)
+  if (!state.probe || state.probe.x !== tile.x || state.probe.y !== tile.y) return
+  state.probe = { ...state.probe, looking: false, guesses: (out.guesses || []).filter(g => state.byId.get(g.id)), noView: out.noView || out.off }
+  renderDetail()
+}
+
+// The player picked the unit on a clicked tile. A one-tile unit goes right there; a bigger one follows
+// the mouse (starting where its picture fit best) until the player clicks where it stands.
+function nameProbe (id) {
+  const { x, y, guesses } = state.probe
+  const u = unitOf(id)
+  state.probe = null
+  const label = { kind: 'named-tile', tile: { x, y }, guesses }
+  if (u.w * u.h === 1) {
+    putOnIsland(id, x, y, label)
+    renderAll()
+    return
+  }
+  const guess = guesses.find(g => g.id === id)
+  const at = guess || openSpot(u, { x, y })
+  putOnIsland(id, at.x, at.y, label)
+  renderAll()
+}
+
+// Where a unit covering a tile fits without standing on units already on the island: the spot centred
+// on the tile if it's free, else the free spot nearest it; centred on the tile if none is free.
+function openSpot (u, tile) {
+  const taken = new Set(state.roster.flatMap(p => { const o = unitOf(p.id); return core.footprint(p.x, p.y, o.w, o.h) }))
+  const centre = anchorFor(u, tile)
+  const spots = []
+  for (let dx = 0; dx < u.w; dx++) {
+    for (let dy = 0; dy < u.h; dy++) {
+      const x = tile.x - dx
+      const y = tile.y + dy
+      const keys = core.footprint(x, y, u.w, u.h)
+      if (keys.every(k => core.onIsland(k) && !taken.has(k))) spots.push({ x, y, d: Math.abs(x - centre.x) + Math.abs(y - centre.y) })
+    }
+  }
+  spots.sort((a, b) => a.d - b.d)
+  return spots[0] || centre
+}
+
+/* ---------- Moving a unit with the right mouse button ---------- */
+
+// The tile under the mouse, from the island picture's own coordinates.
+function tileUnder (root, e) {
+  const pt = root.createSVGPoint()
+  pt.x = e.clientX
+  pt.y = e.clientY
+  const at = pt.matrixTransform(root.getScreenCTM().inverse())
+  return { x: Math.floor(at.x / TILE) - core.ISLAND_OFFSET, y: Math.floor(at.y / TILE) - core.ISLAND_OFFSET }
+}
+
+function startDrag (e, root, piece) {
+  if (e.button !== 2 || state.view !== 'build' || state.placing) return
+  e.preventDefault()
+  const t = tileUnder(root, e)
+  // Where the unit was grabbed, from its bottom-left tile, so it moves with the mouse from that point.
+  state.drag = { key: piece.key, id: piece.id, dx: t.x - piece.x, dy: t.y - piece.y, at: { x: piece.x, y: piece.y } }
+  renderIsland()
+}
+
+function dragTiles () {
+  const u = unitOf(state.drag.id)
+  return core.footprint(state.drag.at.x, state.drag.at.y, u.w, u.h)
+}
+
+function moveDrag (e) {
+  if (!state.drag) return
+  const root = $('island').querySelector('svg')
+  if (!root) return
+  const t = tileUnder(root, e)
+  const at = { x: t.x - state.drag.dx, y: t.y - state.drag.dy }
+  if (at.x === state.drag.at.x && at.y === state.drag.at.y) return
+  state.drag.at = at
+  markTiles(root, dragTiles())
+}
+
+// Let go: the unit moves there (units it lands on are taken off, and can be put back) unless part of it
+// would be off the island.
+function endDrag (e) {
+  if (!state.drag || e.button !== 2) return
+  const { key, id, at } = state.drag
+  state.drag = null
+  const piece = state.roster.find(p => p.key === key)
+  const u = unitOf(id)
+  if (piece && (piece.x !== at.x || piece.y !== at.y) && core.footprint(at.x, at.y, u.w, u.h).every(k => core.onIsland(k))) {
+    const before = state.roster
+    state.roster = state.roster.filter(p => p !== piece)
+    putOnIsland(id, at.x, at.y, { kind: 'moved', from: { x: piece.x, y: piece.y }, before })
+  }
+  renderAll()
+}
+
+function renderProbeDetail (host) {
+  const p = state.probe
+  const input = el('input', { list: 'allUnitNames', placeholder: 'Type a unit…', autocomplete: 'off' })
+  const commit = () => {
+    const unit = state.data.units.find(u => u.name.toLowerCase() === input.value.trim().toLowerCase())
+    if (unit) nameProbe(unit.id)
+  }
+  input.addEventListener('change', commit)
+  input.addEventListener('keydown', e => { if (e.key === 'Enter') commit() })
+  const note = p.looking ? 'Checking the game screen…'
+    : p.noView ? 'The app hasn\'t had a clear look at your island yet, so it can\'t guess. Type the unit instead.'
+      : p.guesses.length ? 'Most likely first:' : 'Nothing fits there well. Type the unit instead.'
+  host.hidden = false
+  host.replaceChildren(el('div', {},
+    el('h3', {}, 'Which unit is on this tile?'),
+    el('p', { class: 'muted' }, note),
+    el('div', { class: 'unsure-guesses' },
+      p.guesses.map(g => el('button', { type: 'button', title: `Fits ${Math.round(g.score * 100)}%`, onclick: () => nameProbe(g.id) }, dot(unitOf(g.id).faction), ' ', unitOf(g.id).name)),
+      input,
+      el('button', { type: 'button', class: 'link', onclick: () => { state.probe = null; renderAll() } }, 'Cancel'))
+  ))
+  if (!p.looking) input.focus()
+}
+
+function unsureKey (spot) {
+  return `${spot.x},${spot.y}`
+}
+
+function selectUnsure (spot) {
+  state.selectedUnsure = state.selectedUnsure === unsureKey(spot) ? null : unsureKey(spot)
+  state.probe = null
+  state.selected = state.selectedKey = null
+  renderIsland()
+  renderDetail()
+}
+
+// The player named what stands on an unsure spot (a guess, or a unit typed in), or said nothing does.
+function nameUnsure (spot, id) {
+  if (id == null) {
+    labelIsland('nothing-here', { spot: { x: spot.x, y: spot.y, w: spot.w, h: spot.h }, guesses: spot.guesses })
+    state.unsureDismissed = [{ tiles: core.footprint(spot.x, spot.y, spot.w, spot.h), at: Date.now() }, ...state.unsureDismissed].slice(0, 20)
+  } else {
+    const guess = spot.guesses.find(g => g.id === id)
+    const u = unitOf(id)
+    const at = guess || anchorFor(u, { x: spot.x + Math.floor((spot.w - 1) / 2), y: spot.y - Math.floor((spot.h - 1) / 2) })
+    putOnIsland(id, at.x, at.y, { kind: 'named-unsure', spot: { x: spot.x, y: spot.y, w: spot.w, h: spot.h }, guesses: spot.guesses })
+  }
+  state.unsure = state.unsure.filter(s => s !== spot)
+  state.selectedUnsure = null
+  renderAll()
+}
+
+function renderUnsureDetail (host, spot) {
+  const input = el('input', { list: 'allUnitNames', placeholder: 'Another unit…', autocomplete: 'off' })
+  const commit = () => {
+    const unit = state.data.units.find(u => u.name.toLowerCase() === input.value.trim().toLowerCase())
+    if (unit) nameUnsure(spot, unit.id)
+  }
+  input.addEventListener('change', commit)
+  input.addEventListener('keydown', e => { if (e.key === 'Enter') commit() })
+  host.hidden = false
+  host.replaceChildren(el('div', {},
+    el('h3', {}, 'What is here?'),
+    el('p', { class: 'muted' }, 'The app sees something on these tiles but isn\'t sure which unit it is.'),
+    el('div', { class: 'unsure-guesses' },
+      spot.guesses.map(g => el('button', { type: 'button', onclick: () => nameUnsure(spot, g.id) }, dot(unitOf(g.id).faction), ' ', unitOf(g.id).name)),
+      input,
+      el('button', { type: 'button', class: 'link', onclick: () => nameUnsure(spot, null) }, 'Nothing here'))
+  ))
+}
+
 function selectUnit (id, key = null) {
+  state.selectedUnsure = null
+  state.probe = null
   state.selected = state.selected === id ? null : id
   state.selectedKey = state.selected == null ? null : key
   renderIsland()
@@ -247,6 +450,9 @@ function selectUnit (id, key = null) {
 
 function renderDetail () {
   const host = $('detail')
+  const spot = state.view === 'build' && state.selectedUnsure && state.unsure.find(s => unsureKey(s) === state.selectedUnsure)
+  if (spot) return renderUnsureDetail(host, spot)
+  if (state.view === 'build' && state.probe) return renderProbeDetail(host)
   if (state.selected == null) { host.hidden = true; return }
   const u = unitOf(state.selected)
   const names = ids => ids.map(id => unitOf(id).name).join(', ')
@@ -528,6 +734,7 @@ function onIsland (reading) {
     const { roster, removed } = core.trackIsland(state.roster, reading, state.byId, reading.at, { bought: state.bought, owned: ownedCopies() })
     state.roster = roster
     noteRemoved(removed)
+    state.unsure = core.trackUnsure(state.unsure, reading, state.roster, state.byId, reading.at)
     if (reading.view === 'ok') state.islandSeenAt = reading.at
   }
   renderAll()
@@ -592,22 +799,32 @@ function anchorFor (u, tile) {
 function placeAt (tile) {
   const { ref, id } = state.placing
   const { x, y } = anchorFor(unitOf(id), tile)
-  putOnIsland(id, x, y)
+  putOnIsland(id, x, y, { kind: ref === 'add' ? 'added' : ref === 'bought' ? 'placed-bought' : ref.startsWith('removed:') ? 'placed-removed' : 'placed', tile })
   if (ref.startsWith('removed:')) state.removed = state.removed.filter(r => r.piece.key !== ref.slice(8))
   state.placing = null
   renderAll()
 }
 
 // Puts a unit on the island by hand; whatever stood on those tiles is taken off.
-function putOnIsland (id, x, y) {
+function putOnIsland (id, x, y, label = null) {
+  const before = state.roster
   const { roster, removed } = core.placePiece(state.roster, id, x, y, state.byId, Date.now())
   state.roster = roster
   noteRemoved(removed)
+  if (label) labelIsland(label.kind, { ...label, id, x, y, displaced: removed.map(p => p.key), before: label.before || before })
+}
+
+// Tells the app a correction the player made, kept as an example for tuning recognition (only saved
+// when the app runs from its code with Save pictures on). before: the island as the app had it.
+function labelIsland (kind, { before = state.roster, ...info } = {}) {
+  if (!api.labelIsland) return
+  api.labelIsland({ kind, ...info, island: before.map(p => ({ key: p.key, id: p.id, x: p.x, y: p.y, how: p.how, inLog: !!p.inLog })) })
 }
 
 // The player says a unit shown on the island isn't there anymore.
 function takeOffIsland (key) {
   const gone = state.roster.filter(p => p.key === key)
+  if (gone.length) labelIsland('removed', { id: gone[0].id, x: gone[0].x, y: gone[0].y })
   state.roster = state.roster.filter(p => p.key !== key)
   noteRemoved(gone, { byHand: true })
   state.selected = state.selectedKey = null
@@ -619,7 +836,7 @@ function putBack (key) {
   const r = state.removed.find(q => q.piece.key === key)
   if (!r) return
   state.removed = state.removed.filter(q => q !== r)
-  putOnIsland(r.piece.id, r.piece.x, r.piece.y)
+  putOnIsland(r.piece.id, r.piece.x, r.piece.y, { kind: 'put-back' })
   renderAll()
 }
 
@@ -643,7 +860,12 @@ function renderMissing () {
   const placing = state.placing && state.view === 'build'
   $('addUnit').hidden = state.view !== 'build'
   $('placeHint').hidden = !placing
-  if (placing) $('placeHint').textContent = `Click the tile where ${unitOf(state.placing.id).name} stands on your island.`
+  if (placing) {
+    const u = unitOf(state.placing.id)
+    $('placeHint').textContent = u.w * u.h > 1
+      ? `Move the outline over where ${u.name} stands on your island, then click. Esc cancels.`
+      : `Click the tile where ${u.name} stands on your island. Esc cancels.`
+  }
 }
 
 /* ---------- Status ---------- */
@@ -676,6 +898,7 @@ function renderStatus () {
   let seen = state.view === 'build' && state.islandSeenAt ? ` · checked in game ${new Date(state.islandSeenAt).toLocaleTimeString()}` : ''
   if (state.view === 'build' && state.islandView === 'moved') seen += ' · paused: the game view moved (drag a unit or open Island Stats to resume)'
   if (state.view === 'build' && state.islandView === 'unknown') seen += ' · drag a unit or open Island Stats once so the app can find your island'
+  if (state.view === 'build' && state.unsure.length) seen += ` · ${plural(state.unsure.length, 'spot')} to check (?)`
   $('boardMeta').textContent = board.length ? plural(board.length, 'unit') + seen : ''
   $('foot').textContent = state.data ? `Game data: patch ${state.data.patch} (${state.data.source}) from SkyShard-Public · Watching ${s.path || '…'}` : ''
 }
@@ -691,7 +914,19 @@ function renderAdvice () {
   renderUnlocks(owned)
 }
 
+// Unsure spots a unit now stands on are settled; ones the player said hold nothing stay away a while.
+function pruneUnsure () {
+  const now = Date.now()
+  state.unsureDismissed = state.unsureDismissed.filter(d => now - d.at < UNSURE_DISMISS_FOR)
+  const dismissed = new Set(state.unsureDismissed.flatMap(d => d.tiles))
+  state.unsure = core.trackUnsure(state.unsure, null, state.roster, state.byId, now)
+    .filter(s => !core.footprint(s.x, s.y, s.w, s.h).some(k => dismissed.has(k)))
+  if (state.selectedUnsure && !state.unsure.some(s => unsureKey(s) === state.selectedUnsure)) state.selectedUnsure = null
+}
+const UNSURE_DISMISS_FOR = 10 * 60 * 1000
+
 function renderAll () {
+  pruneUnsure()
   renderStatus()
   renderIsland()
   renderMissing()
@@ -710,7 +945,7 @@ function boardKey (log) {
 }
 function saveRound () {
   if (!state.restored) return
-  const saved = { run: state.rawLog.runKey || null, board: boardKey(state.rawLog), roster: state.roster, removed: state.removed, bought: state.bought, boughtSince: state.boughtSince, at: Date.now() }
+  const saved = { run: state.rawLog.runKey || null, board: boardKey(state.rawLog), roster: state.roster, removed: state.removed, unsure: state.unsure, bought: state.bought, boughtSince: state.boughtSince, at: Date.now() }
   try { localStorage.setItem('island', JSON.stringify(saved)) } catch {}
 }
 function restoreRound () {
@@ -726,6 +961,7 @@ function restoreRound () {
     if (run ? saved.run !== run : saved.run && !(Date.now() - saved.at < 30 * 60 * 1000)) return
     state.roster = saved.roster || []
     state.removed = saved.removed || []
+    state.unsure = saved.unsure || []
     if (saved.board === boardKey(state.rawLog) || !run) {
       state.bought = saved.bought || []
       state.boughtSince = saved.boughtSince || 0
@@ -787,6 +1023,8 @@ function newRun () {
   state.boardRound = null
   state.roster = []
   state.removed = []
+  state.unsure = []
+  state.selectedUnsure = null
   state.placing = null
   state.shop = null
   api.newRun()
@@ -807,6 +1045,8 @@ async function init () {
     document.querySelectorAll('.tab').forEach(t => t.classList.toggle('active', t === tab))
     state.view = tab.dataset.view
     state.selected = null
+    state.selectedUnsure = null
+    state.probe = null
     renderAll()
   }))
   $('recMore').addEventListener('click', () => { state.recLimit += REC_PAGE; renderAdvice() })
@@ -838,7 +1078,15 @@ async function init () {
   api.onShop(onShopEvent)
   api.onIsland(onIsland)
   if (api.onUnitCard) api.onUnitCard(onUnitCard)
-  document.addEventListener('keydown', e => { if (e.key === 'Escape' && state.placing) { state.placing = null; renderAll() } })
+  document.addEventListener('mousemove', moveDrag)
+  document.addEventListener('mouseup', endDrag)
+  document.addEventListener('keydown', e => {
+    if (e.key !== 'Escape' || !(state.placing || state.probe || state.drag)) return
+    state.placing = null
+    state.probe = null
+    state.drag = null
+    renderAll()
+  })
   const addInput = $('addUnitInput')
   const addUnit = () => {
     const unit = state.data.units.find(u => u.name.toLowerCase() === addInput.value.trim().toLowerCase())

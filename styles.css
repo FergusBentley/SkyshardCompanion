@@ -196,10 +196,19 @@ h2 {
 
 /* Island changes read from the game */
 .unit.seen rect { stroke: #fff; stroke-dasharray: 4 3; stroke-width: 1.5; }
+.unit.unsure rect { fill: rgba(226, 180, 76, 0.22); stroke: var(--warn); stroke-dasharray: 3 2; stroke-width: 1.5; }
+.unit.unsure text { fill: var(--warn); }
+.unit.unsure.selected rect { stroke: var(--accent); stroke-width: 3; }
+.unsure-guesses { display: flex; flex-wrap: wrap; gap: 6px; align-items: center; }
+.unsure-guesses input { width: 160px; }
 .unit.passive { pointer-events: none; opacity: 0.7; }
 .cell.pick { cursor: crosshair; }
-.cell.pick.hot { fill: var(--accent); }
-.cell.pick.bad { fill: #b5473a; }
+.cell.probe { cursor: pointer; }
+.cell.probe:hover { fill: var(--panel-2); }
+.cell.probing { fill: var(--warn); }
+.cell.hot { fill: var(--accent); }
+.cell.bad { fill: #b5473a; }
+.unit.dragging { opacity: 0.35; }
 .add-unit { margin-top: 8px; }
 .add-unit input { width: 100%; max-width: 280px; }
 .place-hint { margin: 8px 0 0; color: var(--accent); font-size: 13px; }
